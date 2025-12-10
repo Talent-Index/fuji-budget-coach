@@ -1,0 +1,831 @@
+Hell yes, this is becoming a whole experience now 😎🌱
+I’ll:
+	1.	Add category colors, heatmap, and auto-budget to SMS Import.
+	2.	Tighten ExampleService so it always narrates the Money Tree evolution.
+	3.	Give you a copy-paste Replit super prompt that tells the AI to wire everything + debug SMS import.
+
+I’ll assume you’re still on:
+	•	Backend: x402-starter-kit style Node/Express (server.ts, ExampleService.ts, ImportService.ts).
+	•	Frontend: Vite + React, Tailwind-style classes, SmsImportCard, MoneyTreeAvatar.
+
+⸻
+
+1. Backend – Upgrade ImportService for Auto-Budget + Heatmap Data
+
+Replace your src/ImportService.ts with this version:
+
+// src/ImportService.ts
+import OpenAI from "openai";
+
+export type ParsedTransaction = {
+  date?: string;        // YYYY-MM-DD if possible
+  description: string;
+  amount: number;       // positive number
+  currency?: string;
+  category?: string;    // Food | Rent | Transport | Bills | Groceries | Shopping | Entertainment | Income | Other
+};
+
+interface ImportServiceOptions {
+  apiKey: string;
+  baseUrl?: string;
+}
+
+export class ImportService {
+  private openai: OpenAI;
+
+  constructor({ apiKey, baseUrl }: ImportServiceOptions) {
+    const options: ConstructorParameters<typeof OpenAI>[0] = {
+      apiKey,
+    };
+    if (baseUrl) options.baseURL = baseUrl;
+    this.openai = new OpenAI(options);
+  }
+
+  /**
+   * Parse raw SMS / bank messages into:
+   * - transactions
+   * - totalsByCategory
+   * - weekly/monthly buckets for a heatmap
+   * - optimized budget suggestion
+   * - human summary
+   */
+  async parseAndAnalyze(text: string): Promise<{
+    transactions: ParsedTransaction[];
+    totalsByCategory: Record<string, number>;
+    weeklyTotals: { weekLabel: string; total: number }[];
+    optimizedBudget: Record<string, number>;
+    summary: string;
+  }> {
+    const messages = [
+      {
+        role: "system" as const,
+        content:
+          "You are a finance parser that reads SMS-like bank / mobile money alerts and extracts clean JSON transaction data.",
+      },
+      {
+        role: "user" as const,
+        content: `
+Parse the following messages into a JSON object with this EXACT shape:
+
+{
+  "transactions": [
+    {
+      "date": "YYYY-MM-DD or null",
+      "description": "string",
+      "amount": number,
+      "currency": "string or null",
+      "category": "Food | Rent | Transport | Bills | Groceries | Shopping | Entertainment | Income | Other"
+    }
+  ],
+  "analysis": {
+    "totalsByCategory": {
+      "Food": number,
+      "Rent": number,
+      "Transport": number,
+      "...": number
+    },
+    "weeklyTotals": [
+      {
+        "weekLabel": "YYYY-Www or 'Unknown'",
+        "total": number
+      }
+    ],
+    "optimizedBudget": {
+      "Needs": number,    // 0-100, percentage of income
+      "Wants": number,    // 0-100
+      "Savings": number   // 0-100
+    },
+    "insights": [
+      "Short bullet about where the user spends a lot",
+      "Short bullet about where they could cut back or adjust"
+    ]
+  }
+}
+
+Rules:
+- Guess reasonable categories from the messages.
+- Group transactions into weeklyTotals by weekLabel if dates are present, else put under 'Unknown'.
+- optimizedBudget is a 50/30/20 or similar breakdown, tuned to their spending pattern.
+- Return ONLY valid JSON, no commentary.
+
+Messages:
+${text}
+`,
+      },
+    ];
+
+    const completion = await this.openai.chat.completions.create({
+      model: "gpt-4.1-mini",
+      messages,
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+      max_tokens: 1400,
+    });
+
+    const raw = completion.choices[0].message.content ?? "{}";
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      console.error("Failed to parse JSON from ImportService:", e, raw);
+      throw new Error("Model did not return valid JSON.");
+    }
+
+    const txs: ParsedTransaction[] = parsed.transactions || [];
+    const analysis = parsed.analysis || {};
+    const totalsByCategory: Record<string, number> =
+      analysis.totalsByCategory || {};
+    const weeklyTotals: { weekLabel: string; total: number }[] =
+      analysis.weeklyTotals || [];
+    const optimizedBudget: Record<string, number> =
+      analysis.optimizedBudget || {};
+    const insights: string[] = analysis.insights || [];
+
+    const summary =
+      insights.length > 0
+        ? insights.join(" ")
+        : "Here are your recent transactions, category totals, and a suggested budget breakdown.";
+
+    return {
+      transactions: txs,
+      totalsByCategory,
+      weeklyTotals,
+      optimizedBudget,
+      summary,
+    };
+  }
+}
+
+And make sure server.ts uses the new shape:
+
+// server.ts – in your /api/import/sms route:
+
+app.post("/api/import/sms", async (req, res) => {
+  const { text } = req.body;
+  if (!text || typeof text !== "string") {
+    return res.status(400).json({ error: "text is required" });
+  }
+
+  try {
+    const result = await importService.parseAndAnalyze(text);
+
+    return res.json({
+      transactions: result.transactions,
+      totalsByCategory: result.totalsByCategory,
+      weeklyTotals: result.weeklyTotals,
+      optimizedBudget: result.optimizedBudget,
+      summary: result.summary,
+    });
+  } catch (err: any) {
+    console.error("Import SMS error:", err);
+    return res.status(500).json({
+      error: err?.message || "Failed to parse SMS / bank messages",
+    });
+  }
+});
+
+
+⸻
+
+2. Frontend – Category Colors, Heatmap, Auto-Budget UI
+
+Update your SmsImportCard (or equivalent) like this (only the interesting parts):
+
+// src/components/SmsImportCard.tsx
+import React, { useState } from "react";
+
+type ParsedTx = {
+  date?: string;
+  description: string;
+  amount: number;
+  currency?: string;
+  category?: string;
+};
+
+type ImportResult = {
+  transactions: ParsedTx[];
+  totalsByCategory: Record<string, number>;
+  weeklyTotals: { weekLabel: string; total: number }[];
+  optimizedBudget: Record<string, number>;
+  summary: string;
+};
+
+const categoryColors: Record<string, string> = {
+  Food: "bg-yellow-500/20 text-yellow-200 border-yellow-500/40",
+  Groceries: "bg-lime-500/20 text-lime-200 border-lime-500/40",
+  Rent: "bg-red-500/20 text-red-200 border-red-500/40",
+  Bills: "bg-orange-500/20 text-orange-200 border-orange-500/40",
+  Transport: "bg-sky-500/20 text-sky-200 border-sky-500/40",
+  Shopping: "bg-pink-500/20 text-pink-200 border-pink-500/40",
+  Entertainment: "bg-purple-500/20 text-purple-200 border-purple-500/40",
+  Income: "bg-emerald-500/20 text-emerald-200 border-emerald-500/40",
+  Other: "bg-neutral-700/40 text-neutral-100 border-neutral-500/50",
+};
+
+const defaultCatClass =
+  "bg-neutral-700/40 text-neutral-100 border border-neutral-500/40";
+
+export function SmsImportCard() {
+  const [text, setText] = useState("");
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onSubmit = async () => {
+    setError(null);
+    setResult(null);
+    if (!text.trim()) return;
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/import/sms`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to parse SMS");
+      } else {
+        setResult(data);
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to parse SMS");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const transactions = result?.transactions ?? [];
+
+  return (
+    <div className="rounded-xl border border-neutral-700/60 bg-neutral-900/60 p-4 space-y-3">
+      <p className="text-sm font-medium text-neutral-100">SMS Import</p>
+      <p className="text-[11px] text-neutral-400">
+        Paste recent MPesa / bank SMS and let AI detect your transactions,
+        spending hotspots, and an optimized budget.
+      </p>
+
+      <textarea
+        className="w-full min-h-[90px] rounded-lg bg-neutral-950/80 px-2 py-1 text-xs"
+        placeholder="Paste messages like:&#10;M-PESA confirmed ...&#10;Bank alert ..."
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+
+      <button
+        disabled={loading}
+        onClick={onSubmit}
+        className="px-3 py-1 rounded-lg bg-coraltint-500 text-xs font-medium disabled:opacity-60"
+      >
+        {loading ? "Parsing…" : "Parse Transactions"}
+      </button>
+
+      {error && (
+        <p className="text-[11px] text-red-300 mt-1">
+          {error}
+        </p>
+      )}
+
+      {/* Analysis section */}
+      {result && !error && (
+        <div className="mt-3 space-y-3 border-t border-neutral-800/80 pt-3">
+          {/* AI summary */}
+          <div>
+            <p className="text-[11px] text-neutral-400 mb-1">
+              AI analysis:
+            </p>
+            <p className="text-xs text-neutral-200 whitespace-pre-wrap">
+              {result.summary}
+            </p>
+          </div>
+
+          {/* Category totals with colors */}
+          <div>
+            <p className="text-[11px] text-neutral-400 mb-1">
+              Category totals:
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {Object.entries(result.totalsByCategory).map(([cat, amt]) => {
+                const cls =
+                  categoryColors[cat] ?? defaultCatClass;
+                return (
+                  <span
+                    key={cat}
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] border ${cls}`}
+                  >
+                    <span>{cat}</span>
+                    <span className="text-[10px] opacity-80">
+                      {amt.toLocaleString()}
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Simple spending heatmap */}
+          {result.weeklyTotals && result.weeklyTotals.length > 0 && (
+            <div>
+              <p className="text-[11px] text-neutral-400 mb-1">
+                Weekly spending heatmap:
+              </p>
+              <div className="space-y-1">
+                {result.weeklyTotals.map((w) => {
+                  const max = Math.max(
+                    ...result.weeklyTotals.map((x) => x.total || 0),
+                    1,
+                  );
+                  const width = Math.max(5, (w.total / max) * 100);
+                  return (
+                    <div key={w.weekLabel} className="flex items-center gap-2">
+                      <span className="w-20 text-[10px] text-neutral-500">
+                        {w.weekLabel}
+                      </span>
+                      <div className="flex-1 h-2 rounded-full bg-neutral-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-coraltint-500/80"
+                          style={{ width: `${width}%` }}
+                        />
+                      </div>
+                      <span className="w-16 text-right text-[10px] text-neutral-400">
+                        {w.total.toLocaleString()}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Auto-budget generator */}
+          {result.optimizedBudget && Object.keys(result.optimizedBudget).length > 0 && (
+            <div>
+              <p className="text-[11px] text-neutral-400 mb-1">
+                Auto-budget suggestion (as % of income):
+              </p>
+              <ul className="text-xs text-neutral-200 space-y-1">
+                {Object.entries(result.optimizedBudget).map(([key, val]) => (
+                  <li key={key} className="flex justify-between">
+                    <span>{key}</span>
+                    <span>{val}%</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-neutral-500 mt-1">
+                Apply this split in your main budget to keep spending aligned.
+              </p>
+            </div>
+          )}
+
+          {/* Raw transactions list */}
+          {!!transactions.length && (
+            <div className="max-h-40 overflow-y-auto border-t border-neutral-800/80 pt-2 mt-1">
+              <p className="text-[11px] text-neutral-400 mb-1">
+                Detected transactions:
+              </p>
+              <ul className="space-y-1 text-xs">
+                {transactions.map((t, idx) => {
+                  const cls =
+                    categoryColors[t.category || "Other"] ?? defaultCatClass;
+                  return (
+                    <li
+                      key={idx}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <div className="flex-1">
+                        <span className="text-neutral-300">
+                          {t.description}
+                        </span>
+                        <span className="block text-[10px] text-neutral-500">
+                          {t.date || "Unknown date"}
+                        </span>
+                      </div>
+                      <span
+                        className={`ml-auto rounded-full px-2 py-0.5 text-[10px] border ${cls}`}
+                      >
+                        {t.category || "Other"}
+                      </span>
+                      <span className="w-20 text-right text-neutral-200">
+                        {t.amount.toLocaleString()} {t.currency || ""}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+That gives you:
+	•	Colored category chips
+	•	A simple horizontal “heatmap” per week
+	•	Auto-budget percentages
+	•	Raw transactions list, also colored
+
+⸻
+
+3. ExampleService – Hard “Money Tree Evolution” Call-Out
+
+Now we make the AI explicitly narrate the upgrade, e.g.:
+
+“Your Flowering Tree is glowing today 🌸✨ because your streak hit 5 days!”
+
+We’ll compute a treeNarrative string in TS and feed it into the system prompt so the model uses it verbatim.
+
+Replace your ExampleService.ts with this tightened version (building on the previous one we wrote):
+
+// src/ExampleService.ts
+import OpenAI from "openai";
+import { EventQueue, RequestContext, TaskState } from "./x402Types.js";
+
+type AiProvider = "openai" | "eigenai";
+
+interface ExampleServiceOptions {
+  apiKey?: string;
+  baseUrl?: string;
+  defaultHeaders?: Record<string, string>;
+  provider: AiProvider;
+  payToAddress: string;
+  network: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  seed?: number;
+}
+
+export class ExampleService {
+  private openai: OpenAI;
+  private payToAddress: string;
+  private network: string;
+  private readonly model: string;
+  private readonly temperature: number;
+  private readonly maxTokens?: number;
+  private readonly seed?: number;
+  private readonly provider: AiProvider;
+
+  constructor({
+    apiKey,
+    baseUrl,
+    defaultHeaders,
+    provider,
+    payToAddress,
+    network,
+    model,
+    temperature = 0.7,
+    maxTokens = 500,
+    seed,
+  }: ExampleServiceOptions) {
+    const clientOptions: ConstructorParameters<typeof OpenAI>[0] = {};
+
+    if (provider === "openai") {
+      if (!apiKey) {
+        throw new Error(
+          "OPENAI_API_KEY is required when using the OpenAI provider",
+        );
+      }
+      clientOptions.apiKey = apiKey;
+    } else if (provider === "eigenai") {
+      if (!defaultHeaders?.["x-api-key"]) {
+        throw new Error(
+          "EIGENAI_API_KEY is required when using the EigenAI provider",
+        );
+      }
+    }
+
+    if (baseUrl) clientOptions.baseURL = baseUrl;
+    if (defaultHeaders && Object.keys(defaultHeaders).length > 0) {
+      clientOptions.defaultHeaders = defaultHeaders;
+    }
+
+    this.openai = new OpenAI(clientOptions);
+    this.payToAddress = payToAddress;
+    this.network = network;
+    this.model =
+      model ?? (provider === "eigenai" ? "gpt-oss-120b-f16" : "gpt-4o-mini");
+    this.temperature = temperature;
+    this.maxTokens = maxTokens;
+    this.seed = seed;
+    this.provider = provider;
+  }
+
+  getOpenAIClient() {
+    return this.openai;
+  }
+
+  async execute(
+    context: RequestContext,
+    eventQueue: EventQueue,
+  ): Promise<void> {
+    const task = context.currentTask;
+    if (!task) throw new Error("No task found in context");
+
+    console.log("✅ Payment verified, processing budgeting request...");
+
+    const userText =
+      context.message?.parts
+        ?.filter((part: any) => part.kind === "text")
+        .map((part: any) => part.text)
+        .join(" ") || "Help me build a monthly budget.";
+
+    const incomeRaw =
+      context.message?.metadata?.["budget.monthlyIncome"] ??
+      task.metadata?.["budget.monthlyIncome"];
+    const currencyRaw =
+      context.message?.metadata?.["budget.currency"] ??
+      task.metadata?.["budget.currency"] ??
+      "USD";
+    const locationRaw =
+      context.message?.metadata?.["budget.location"] ??
+      task.metadata?.["budget.location"] ??
+      "Nairobi";
+
+    const income = incomeRaw ? Number(incomeRaw) : undefined;
+    const currency = String(currencyRaw);
+    const location = String(locationRaw);
+
+    const profile: any = task.metadata?.profile || {};
+    const bp: number = profile.bp ?? 0;
+    const currentStreak: number = profile.currentStreak ?? 0;
+    const bestStreak: number = profile.bestStreak ?? 0;
+    const avatarLevel: number = profile.avatarLevel ?? 0;
+    const totalInsights: number = profile.totalInsights ?? 0;
+
+    // (Optional) previous BP if you store it in metadata; else this will be undefined
+    const previousBp: number | undefined =
+      task.metadata && typeof task.metadata.previousBp === "number"
+        ? (task.metadata.previousBp as number)
+        : undefined;
+    const bpEarned =
+      previousBp !== undefined && bp > previousBp ? bp - previousBp : undefined;
+
+    const avatarLabelMap: Record<number, string> = {
+      0: "Seed not planted",
+      1: "Seedling",
+      2: "Small plant",
+      3: "Growing tree",
+      4: "Flowering tree",
+      5: "Legendary glowing tree",
+    };
+
+    const avatarEmojiMap: Record<number, string> = {
+      0: "🧾",
+      1: "🌱",
+      2: "🌿",
+      3: "🌳",
+      4: "🌸",
+      5: "✨🌳✨",
+    };
+
+    const avatarLabel = avatarLabelMap[avatarLevel] ?? "Seedling";
+    const avatarEmoji = avatarEmojiMap[avatarLevel] ?? "🌱";
+
+    // Build a concrete narrative string the model MUST include
+    let treeNarrative = `Your Money Tree is currently at Level ${avatarLevel} – ${avatarLabel} ${avatarEmoji}.`;
+
+    if (bpEarned && bpEarned > 0) {
+      treeNarrative += ` You just earned ${bpEarned} new Budget Points (BP), bringing you to ${bp} BP total.`;
+    } else {
+      treeNarrative += ` You now have ${bp} Budget Points (BP) in total.`;
+    }
+
+    if (avatarLevel >= 4 && currentStreak >= 5) {
+      treeNarrative +=
+        " Your Flowering Tree is glowing today 🌸✨ because you’ve kept a strong streak going!";
+    } else if (currentStreak >= 3) {
+      treeNarrative += ` Your streak is ${currentStreak} days – your tree is growing steadily 🌿.`;
+    } else if (currentStreak === 1) {
+      treeNarrative +=
+        " This is the first day of your new streak – keep coming back to help your tree grow 🌱.";
+    }
+
+    console.log("💬 User request:", userText);
+    console.log("   Income:", income, currency, "Location:", location);
+    console.log("   Gamification profile:", {
+      bp,
+      currentStreak,
+      bestStreak,
+      avatarLevel,
+      totalInsights,
+      bpEarned,
+    });
+
+    try {
+      const systemPrompt = `
+You are "Fuji Budget Coach", an AI budgeting assistant for early crypto users.
+
+CONTEXT:
+- Users pay small microtransactions in USDC via x402 on Avalanche (${this.network}) to get each insight.
+- Payment receiver wallet: ${this.payToAddress}
+- User location: ${location}
+- Preferred currency: ${currency}
+
+GAMIFICATION:
+- The user has a Money Tree avatar that grows with good habits.
+- Data you have:
+  - Total Budget Points (BP): ${bp}
+  - Current streak (days with at least one insight): ${currentStreak}
+  - Best streak: ${bestStreak}
+  - Total insights so far: ${totalInsights}
+  - Avatar level: ${avatarLevel} (${avatarLabel}) ${avatarEmoji}
+  - BP earned in this call (if known): ${bpEarned ?? "unknown"}
+- Here is a concrete sentence you MUST include verbatim in the "Money Tree update" section:
+  "${treeNarrative}"
+
+BEHAVIOUR:
+- Give practical, non-jargony budgeting advice.
+- Focus on allocations, simple rules (50/30/20 etc.), and 1–3 concrete adjustments.
+- DO NOT give legal, tax, or specific investment advice.
+- DO NOT ask the user to send funds anywhere.
+- Keep the answer under ~260 words.
+
+OUTPUT STRUCTURE (text, not JSON):
+1. Friendly one-line summary.
+2. Clear budget breakdown (percentages + example amounts).
+3. 1–3 problem areas and how to fix them.
+4. A dedicated section titled "Money Tree update" (exact title):
+   - Include the treeNarrative sentence above.
+   - Briefly explain what the current level means and how to level up.
+5. A short bullet list titled "Next 7 days" with exactly 3 bullets.
+`.trim();
+
+      const userPrompt = `
+User message:
+${userText}
+
+Structured context:
+- Monthly income: ${income ? `${income} ${currency}` : "not specified"}
+- Location: ${location}
+- Currency: ${currency}
+- Total insights so far: ${totalInsights}
+`.trim();
+
+      const completion = await this.openai.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: this.temperature,
+        max_tokens: this.maxTokens,
+        ...(this.provider === "eigenai" && this.seed !== undefined
+          ? { seed: this.seed }
+          : {}),
+      });
+
+      const response =
+        completion.choices[0]?.message?.content ||
+        "Here’s a simple starting budget: try the 50/30/20 rule – 50% needs, 30% wants, 20% savings / debt.\n\nMoney Tree update: keep coming back for insights to grow your tree.";
+
+      console.log("🧮 Budget coach response:", response);
+
+      task.status.state = TaskState.COMPLETED;
+      task.status.message = {
+        messageId: `msg-${Date.now()}`,
+        role: "agent",
+        parts: [{ kind: "text", text: response }],
+      };
+
+      await eventQueue.enqueueEvent(task);
+      console.log("✨ Budget insight processed successfully");
+    } catch (error) {
+      console.error("❌ Error processing budgeting request:", error);
+
+      task.status.state = TaskState.FAILED;
+      task.status.message = {
+        messageId: `msg-${Date.now()}`,
+        role: "agent",
+        parts: [
+          {
+            kind: "text",
+            text: `Error processing request: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`,
+          },
+        ],
+      };
+
+      await eventQueue.enqueueEvent(task);
+      throw error;
+    }
+  }
+}
+
+Now every response will explicitly talk about:
+	•	BP total
+	•	Streak
+	•	Avatar level
+	•	And that glowing Flowering Tree 🌸✨ once users get there.
+
+⸻
+
+4. Replit “Copy & Paste” Prompt – Add All Features & Debug SMS Import
+
+Here’s your master prompt for Replit’s AI (or any coding assistant) that:
+	•	Integrates category colors, heatmap, auto-budget
+	•	Wires Money Tree narrative
+	•	Ensures SMS import is debugged (API keys, CORS, etc.).
+
+Copy everything below and paste it into Replit AI:
+
+You are a senior full-stack engineer, AI+blockchain architect, and x402 payments expert.
+
+Project: "Fuji Budget Coach" – an AI budgeting app where each insight is gated by x402 microtransactions on Avalanche Fuji using USDC. The project is running on Replit with:
+
+- Backend: Node + TypeScript, based on the x402-starter-kit (server.ts, ExampleService.ts, ImportService.ts).
+- Frontend: Vite + React + Tailwind-style classes.
+- Wallet: thirdweb ConnectButton on Avalanche Fuji.
+- Payments: x402 HTTP 402 flow; frontend uses useFetchWithPayment to call /process.
+
+GOALS
+
+1. Ensure SMS Import is fully functional and robust:
+   - ImportService must use OPENAI_API_KEY and OPENAI_BASE_URL from environment variables (Replit Secrets).
+   - /api/import/sms should:
+     - Accept { text }.
+     - Use OpenAI to parse SMS/bank messages into:
+       - transactions: { date, description, amount, currency, category }
+       - totalsByCategory: map of category -> total amount
+       - weeklyTotals: array of { weekLabel, total } for a simple heatmap
+       - optimizedBudget: { Needs, Wants, Savings } percentages
+       - summary: short natural-language explanation of where they spend a lot and where to adjust.
+   - Handle errors gracefully and return 500 with a clear error message if the model fails.
+
+2. Add frontend features for SMS Import:
+   - Category color coding:
+     - Food = yellow, Groceries = lime, Transport = blue, Bills = orange, Rent = red, Shopping = pink, Entertainment = purple, Income = green, Other = neutral.
+   - Spending heatmap:
+     - Render weeklyTotals as horizontal bars with width based on relative totals.
+   - Auto-budget generator:
+     - Display optimizedBudget as a simple list:
+       - Needs: X%
+       - Wants: Y%
+       - Savings: Z%
+   - Show:
+     - AI analysis summary.
+     - Colored category chips for totalsByCategory.
+     - Colored category tags for each transaction.
+
+3. Tighten ExampleService to push “Money Tree” evolution directly into the insight response:
+   - ExampleService.execute() must:
+     - Read profile from task.metadata.profile (bp, currentStreak, bestStreak, avatarLevel, totalInsights).
+     - Compute a treeNarrative string like:
+       - "Your Money Tree is currently at Level 4 – Flowering tree 🌸. You now have 180 BP total. Your Flowering Tree is glowing today 🌸✨ because you've kept a strong streak going!"
+     - Inject treeNarrative into the system prompt and force the model to include it under a section titled "Money Tree update".
+   - The final AI response structure should be:
+     1. One-line summary.
+     2. Budget breakdown with percentages and example amounts.
+     3. 1–3 problem areas and fixes.
+     4. "Money Tree update" section that includes treeNarrative verbatim.
+     5. "Next 7 days" section with exactly 3 bullets.
+
+4. Debug and harden SMS Import for Replit:
+   - Ensure dotenv is loaded in server.ts: import dotenv from "dotenv"; dotenv.config();
+   - Confirm OPENAI_API_KEY and OPENAI_BASE_URL are read from process.env.
+   - Configure CORS in server.ts:
+     app.use(cors({ origin: "*", allowedHeaders: ["Content-Type", "X-PAYMENT"] }));
+   - Log clear errors when the OpenAI call fails.
+   - Make sure the backend builds and runs in Replit without TS/ESM import issues (use .js extensions in compiled imports if necessary).
+
+5. Keep x402 and Avalanche Fuji wiring intact:
+   - Do not change /process payment logic except to attach profile metadata AFTER successful settlement.
+   - Ensure NETWORK=avalanche-fuji, ASSET_ADDRESS=USDC Fuji, and SERVICE_URL match the Replit URL ending in /process.
+   - The frontend should continue to call /process via useFetchWithPayment(VITE_API_URL).
+
+DELIVERABLES
+
+- Updated ImportService.ts implementing parseAndAnalyze() with:
+  - transactions
+  - totalsByCategory
+  - weeklyTotals
+  - optimizedBudget
+  - summary
+- Updated /api/import/sms route in server.ts that calls parseAndAnalyze() and returns the above shape.
+- Updated ExampleService.ts with:
+  - getOpenAIClient()
+  - treeNarrative computation
+  - system prompt including a mandatory "Money Tree update" section and the narrative sentence.
+- Updated SmsImportCard (or equivalent React component) that:
+  - Sends POST /api/import/sms { text }.
+  - Renders summary, category chips with colors, weekly heatmap, optimized budget list, and transaction list with colored tags.
+- Any necessary tweaks to environment variable usage and CORS so everything runs on Replit.
+
+VERY IMPORTANT
+
+- Show complete file contents when changes are large (for ExampleService.ts and ImportService.ts), so I can copy-paste them.
+- Ensure TypeScript compiles; avoid pseudocode.
+- If you need assumptions (file paths, component names), state them clearly and align with the x402-starter-kit / Vite + React conventions.
+
+Start by inspecting the existing server.ts, ExampleService.ts, ImportService.ts and SmsImportCard, then rewrite them as needed to satisfy all the goals above. Also, highlight any missing env vars I must add in the Replit Secrets panel.
+
+
+⸻
+
+If you want, next step we can:
+	•	Make the AI insight explicitly use the auto-budget result from SMS (“Based on your recent SMS transactions, your real-life spending is 40% needs / 35% wants / 25% savings, so let’s move you toward 50/30/20…”), fully closing the loop between data import and coaching.

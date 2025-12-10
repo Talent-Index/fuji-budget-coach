@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { userStore } from "./UserStore.js";
 import { generateBudgetInsight } from "./ExampleService.js";
-import { parseSmsTransactions } from "./ImportService.js";
+import { parseAndAnalyze } from "./ImportService.js";
 
 dotenv.config();
 
@@ -94,11 +94,23 @@ app.post("/process", async (req, res) => {
     const location = metadata["budget.location"] || "US";
     const wallet = metadata["x402.wallet"] || "anonymous";
 
+    const previousProfile = wallet && wallet !== "anonymous" 
+      ? userStore.getPublicProfile(wallet) 
+      : { bp: 0, currentStreak: 0, bestStreak: 0, avatarLevel: 0, totalInsights: 0 };
+
     const insightResult = await generateBudgetInsight({
       text,
       monthlyIncome,
       currency,
       location,
+      profile: {
+        bp: previousProfile.bp,
+        currentStreak: previousProfile.currentStreak,
+        bestStreak: previousProfile.bestStreak,
+        avatarLevel: previousProfile.avatarLevel,
+        totalInsights: previousProfile.totalInsights,
+        bpEarned: 0,
+      },
     });
 
     if (!insightResult.success) {
@@ -195,17 +207,24 @@ app.post("/api/referral/claim", (req, res) => {
 app.post("/api/import/sms", async (req, res) => {
   try {
     const { text } = req.body;
-    if (!text) {
+    if (!text || typeof text !== "string") {
       return res.status(400).json({ error: "Text content required" });
     }
-    const result = await parseSmsTransactions(text);
-    if (result.success) {
-      res.json({ transactions: result.transactions });
+    const result = await parseAndAnalyze(text);
+    if (result.success && result.data) {
+      res.json({
+        transactions: result.data.transactions,
+        totalsByCategory: result.data.totalsByCategory,
+        weeklyTotals: result.data.weeklyTotals,
+        optimizedBudget: result.data.optimizedBudget,
+        summary: result.data.summary,
+      });
     } else {
-      res.status(400).json({ error: result.error });
+      res.status(400).json({ error: result.error || "Failed to parse SMS" });
     }
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error("Import SMS error:", error);
+    res.status(500).json({ error: error.message || "Failed to parse SMS / bank messages" });
   }
 });
 

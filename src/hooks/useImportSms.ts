@@ -8,9 +8,17 @@ export interface ParsedTransaction {
   category?: string;
 }
 
+export interface ImportResult {
+  transactions: ParsedTransaction[];
+  totalsByCategory: Record<string, number>;
+  weeklyTotals: { weekLabel: string; total: number }[];
+  optimizedBudget: Record<string, number>;
+  summary: string;
+}
+
 export function useImportSms() {
   return useMutation({
-    mutationFn: async (text: string) => {
+    mutationFn: async (text: string): Promise<ImportResult> => {
       const response = await fetch("/api/import/sms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -20,7 +28,13 @@ export function useImportSms() {
       if (!response.ok) {
         throw new Error(data.error || "Failed to parse transactions");
       }
-      return data.transactions as ParsedTransaction[];
+      return {
+        transactions: data.transactions || [],
+        totalsByCategory: data.totalsByCategory || {},
+        weeklyTotals: data.weeklyTotals || [],
+        optimizedBudget: data.optimizedBudget || {},
+        summary: data.summary || "",
+      };
     },
   });
 }
