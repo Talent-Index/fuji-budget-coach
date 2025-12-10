@@ -97,3 +97,4 @@ The application is configured for static deployment:
 - **Dec 10, 2025**: Upgraded SMS Import with category colors, heatmap, and auto-budget
 - **Dec 10, 2025**: Enhanced ExampleService with Money Tree narrative in AI responses
 - **Dec 10, 2025**: Fixed reward timing - BP/streak only granted after successful insight
+- **Dec 10, 2025**: Integrated SMS auto-budget into AI insights - AI now references real spending patterns
