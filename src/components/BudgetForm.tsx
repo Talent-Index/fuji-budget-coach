@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { DollarSign, MapPin, Send, Sparkles } from "lucide-react";
+import { useActiveAccount } from "thirdweb/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,14 +15,16 @@ interface BudgetFormProps {
     location: string;
   }) => void;
   isLoading: boolean;
-  isConnected: boolean;
 }
 
-export function BudgetForm({ onSubmit, isLoading, isConnected }: BudgetFormProps) {
+export function BudgetForm({ onSubmit, isLoading }: BudgetFormProps) {
   const [income, setIncome] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [location, setLocation] = useState("");
   const [goals, setGoals] = useState("");
+
+  const account = useActiveAccount();
+  const isConnected = !!account;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
