@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
+import { useActiveAccount } from "thirdweb/react";
 import { Header } from "@/components/Header";
 import { HeroSection } from "@/components/HeroSection";
 import { BudgetForm } from "@/components/BudgetForm";
@@ -9,9 +10,7 @@ import { InsightDisplay } from "@/components/InsightDisplay";
 import { requestBudgetInsight } from "@/lib/api";
 
 const Index = () => {
-  // Wallet state (simulated for now - replace with actual thirdweb connection)
-  const [isConnected, setIsConnected] = useState(false);
-  const [walletAddress, setWalletAddress] = useState<string>();
+  const account = useActiveAccount();
 
   // Payment flow state
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("idle");
@@ -26,22 +25,6 @@ const Index = () => {
   // Insight state
   const [insight, setInsight] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-
-  // Wallet handlers
-  const handleConnect = useCallback(() => {
-    // Simulate wallet connection - replace with actual thirdweb
-    setIsConnected(true);
-    setWalletAddress("0x1234...5678");
-    toast.success("Wallet connected!", {
-      description: "Connected to Avalanche Fuji testnet",
-    });
-  }, []);
-
-  const handleDisconnect = useCallback(() => {
-    setIsConnected(false);
-    setWalletAddress(undefined);
-    toast.info("Wallet disconnected");
-  }, []);
 
   // Budget form submission
   const handleSubmit = useCallback(
@@ -87,23 +70,17 @@ const Index = () => {
 
   // Payment handlers
   const handlePay = useCallback(async () => {
-    if (!pendingRequest) return;
+    if (!pendingRequest || !account) return;
 
     setPaymentStatus("processing");
 
     try {
-      // Simulate payment creation (replace with actual x402 payment)
-      // In real implementation:
-      // 1. Create x402 payment payload using thirdweb
-      // 2. Sign the EIP-3009 transferWithAuthorization
-      // 3. Send to backend with payment payload
-
-      // For demo, simulate a brief delay
+      // For now, we use the simulated payment flow
+      // In production with useFetchWithPayment, this would be handled automatically
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      // Mock payment payload - replace with actual x402 implementation
+      // Mock payment payload - the real x402 hook handles this automatically
       const mockPaymentPayload = {
-        // This would be the actual signed EIP-3009 authorization
         signature: "0x...",
         nonce: Date.now(),
       };
@@ -139,7 +116,7 @@ const Index = () => {
         description: error.message,
       });
     }
-  }, [pendingRequest]);
+  }, [pendingRequest, account]);
 
   const handleCancelPayment = useCallback(() => {
     setPaymentStatus("idle");
@@ -160,12 +137,7 @@ const Index = () => {
 
   return (
     <div className="min-h-screen noise-bg">
-      <Header
-        isConnected={isConnected}
-        walletAddress={walletAddress}
-        onConnect={handleConnect}
-        onDisconnect={handleDisconnect}
-      />
+      <Header />
 
       <main className="container mx-auto px-4 pt-24 pb-16">
         <HeroSection />
@@ -177,7 +149,6 @@ const Index = () => {
             <BudgetForm
               onSubmit={handleSubmit}
               isLoading={isLoading}
-              isConnected={isConnected}
             />
           )}
         </div>

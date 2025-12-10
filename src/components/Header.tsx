@@ -1,19 +1,9 @@
-import { Wallet, Zap } from "lucide-react";
+import { Zap } from "lucide-react";
 import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
+import { ConnectButton } from "thirdweb/react";
+import { client, avalancheFuji } from "@/lib/thirdweb";
 
-interface HeaderProps {
-  isConnected: boolean;
-  walletAddress?: string;
-  onConnect: () => void;
-  onDisconnect: () => void;
-}
-
-export function Header({ isConnected, walletAddress, onConnect, onDisconnect }: HeaderProps) {
-  const truncateAddress = (address: string) => {
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-  };
-
+export function Header() {
   return (
     <motion.header
       initial={{ opacity: 0, y: -20 }}
@@ -43,28 +33,30 @@ export function Header({ isConnected, walletAddress, onConnect, onDisconnect }: 
             <span className="text-xs font-medium text-muted-foreground">Avalanche Fuji</span>
           </div>
 
-          {isConnected && walletAddress ? (
-            <Button
-              variant="glass"
-              size="sm"
-              onClick={onDisconnect}
-              className="gap-2"
-            >
-              <Wallet className="w-4 h-4" />
-              <span className="hidden sm:inline">{truncateAddress(walletAddress)}</span>
-              <span className="sm:hidden">Connected</span>
-            </Button>
-          ) : (
-            <Button
-              variant="hero"
-              size="sm"
-              onClick={onConnect}
-              className="gap-2"
-            >
-              <Wallet className="w-4 h-4" />
-              Connect Wallet
-            </Button>
-          )}
+          <ConnectButton
+            client={client}
+            chain={avalancheFuji}
+            connectButton={{
+              label: "Connect Wallet",
+              style: {
+                padding: "0.5rem 1rem",
+                borderRadius: "0.75rem",
+                background: "linear-gradient(135deg, hsl(12, 100%, 62%), hsl(18, 100%, 55%))",
+                color: "white",
+                fontSize: "0.875rem",
+                fontWeight: 500,
+              },
+            }}
+            detailsButton={{
+              style: {
+                padding: "0.5rem 1rem",
+                borderRadius: "0.75rem",
+                background: "hsl(240, 10%, 10%)",
+                border: "1px solid hsl(240, 5%, 20%)",
+                fontSize: "0.875rem",
+              },
+            }}
+          />
         </div>
       </div>
     </motion.header>
