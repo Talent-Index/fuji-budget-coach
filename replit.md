@@ -94,3 +94,6 @@ The application is configured for static deployment:
 - **Dec 10, 2025**: Added Avatar Engine with BP and streak system
 - **Dec 10, 2025**: Added referral system and trends dashboard
 - **Dec 10, 2025**: Added SMS transaction import feature
+- **Dec 10, 2025**: Upgraded SMS Import with category colors, heatmap, and auto-budget
+- **Dec 10, 2025**: Enhanced ExampleService with Money Tree narrative in AI responses
+- **Dec 10, 2025**: Fixed reward timing - BP/streak only granted after successful insight
