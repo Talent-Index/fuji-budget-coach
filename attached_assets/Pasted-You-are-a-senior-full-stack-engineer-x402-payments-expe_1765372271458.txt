@@ -1,0 +1,96 @@
+You are a senior full-stack engineer, x402 payments expert, and React + Node specialist.
+
+We are building “Fuji Budget Coach” – an AI budgeting app that uses x402 microtransactions on Avalanche Fuji with USDC. The project is already partially built based on the official x402-starter-kit backend and a Vite + React + thirdweb frontend. Wallet connect with thirdweb ConnectButton is working.
+
+I have the following goals:
+
+1. Enable FULL x402 payment flow in Replit:
+   - Backend runs the x402-starter-kit style server (Express + TypeScript).
+   - Network must be Avalanche Fuji: NETWORK=avalanche-fuji.
+   - USDC Fuji token address: 0x5425890298aed601595a70AB815c96711a31Bc65.
+   - Use PAY_TO_ADDRESS = my Core wallet address on Fuji.
+   - SERVICE_URL must match the Replit public URL ending with /process.
+   - Implement CORS:
+     app.use(cors({ origin: "*", allowedHeaders: ["Content-Type", "X-PAYMENT"] }));
+   - The /process endpoint must:
+     - Return 402 + x402 JSON when there is no payment payload.
+     - On paid retry, verify and settle payment, then call ExampleService and return the AI response.
+   - Frontend must use useFetchWithPayment(client) from thirdweb/react to call /process, handling 402 -> pay -> retry automatically.
+
+2. Integrate the following features (in this exact order):
+
+   (A) Avatar Engine (“Money Tree”)
+   - Backend:
+     - Implement src/UserStore.ts and src/avatarLevels.ts similar to what I described previously:
+       - UserProfile with fields: wallet, bp, totalInsights, lastInsightAt, currentStreak, bestStreak, referrals, referredBy, referralCode, insights.
+       - rewardPaidInsight({ wallet, income, currency, location }) called AFTER a successful payment.
+       - computeAvatarLevel(profile) returns avatarLevel 0-5 based on BP, streaks, and referrals.
+     - Expose routes:
+       - GET /api/profile/:wallet -> returns PublicProfile (profile + avatarLevel).
+       - GET /api/history/:wallet?limit=50 -> returns last N insight snapshots.
+       - POST /api/referral/claim { wallet, code } -> handles referral logic, returning error messages when invalid.
+   - Frontend:
+       - Implement a hook useProfile() using useActiveAccount() + fetch(/api/profile/:wallet).
+       - Implement MoneyTreeAvatar component that shows an emoji tree and progress bar based on avatarLevel, BP, and streak.
+       - Display MoneyTreeAvatar near the top of the main page.
+
+   (B) Budget Points (BP) and Streak System
+   - Backend:
+       - rewardPaidInsight must:
+         - Award 10 BP per paid insight.
+         - Add 5 extra BP when streak increases.
+         - Add 20 BP every 10 insights (milestone).
+       - Update streak based on days between insights.
+   - Frontend:
+       - Show BP and streak text in the avatar card.
+       - Optionally show “X-day streak” label.
+
+   (C) Referral System
+   - Backend:
+       - In UserStore.ts, support referralIndex map and claimReferral() logic:
+         - Prevent self-referral and double-claiming.
+         - Give +50 BP to both referrer and referee on first successful claim.
+       - Make sure new user profiles have a generated referralCode.
+   - Frontend:
+       - Create ReferralCard component:
+         - Show “Your code: {referralCode}” with copy button.
+         - Simple input to paste a friend’s code and POST to /api/referral/claim.
+         - Show success/error messages.
+
+   (D) Trends Dashboard
+   - Backend:
+       - Each rewardPaidInsight call should push a simple snapshot with createdAt, income, currency, location into profile.insights.
+   - Frontend:
+       - Create useHistory() hook fetching /api/history/:wallet.
+       - Create TrendsDashboard component:
+         - List recent insight dates and incomes.
+         - Show text summary like “Insights: N • First: date • Latest: date”.
+         - Future placeholder comment for advanced charts.
+
+   (E) SMS/PDF Transaction Import MVP
+   - Backend:
+       - Implement src/ImportService.ts using OpenAI to parse SMS-like text into an array of transactions:
+         { date?, description, amount, currency?, category? }.
+       - Add POST /api/import/sms { text } route that returns { transactions } or an error.
+   - Frontend:
+       - Implement SmsImportCard component with:
+         - textarea for pasted SMS messages.
+         - “Parse transactions” button calling /api/import/sms.
+         - List of parsed transactions.
+
+3. Keep the overall structure:
+   - Do NOT break the x402-starter-kit conventions.
+   - Use TypeScript imports with .js extensions in compiled output.
+   - Ensure code compiles in Replit (Node 18+).
+
+4. Fix any Replit-specific issues:
+   - Ensure build scripts and ts-node or compiled JS run correctly.
+   - Make sure the frontend Vite dev server can reach the backend using VITE_API_URL.
+   - Ensure CORS and X-PAYMENT headers are correctly handled.
+
+5. When you respond:
+   - Show updated versions of: server.ts, UserStore.ts, avatarLevels.ts, ImportService.ts, and any new React components or hooks.
+   - Make code copy-paste-ready; no pseudocode.
+   - If something depends on environment variables, clearly state which ones and show example values.
+
+Start by verifying the current project structure and then write the necessary files or modifications to implement all of the above.

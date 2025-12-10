@@ -2,15 +2,21 @@ import { useState, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { useActiveAccount } from "thirdweb/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/Header";
 import { HeroSection } from "@/components/HeroSection";
 import { BudgetForm } from "@/components/BudgetForm";
 import { PaymentFlow, PaymentStatus } from "@/components/PaymentFlow";
 import { InsightDisplay } from "@/components/InsightDisplay";
+import { MoneyTreeAvatar } from "@/components/MoneyTreeAvatar";
+import { ReferralCard } from "@/components/ReferralCard";
+import { TrendsDashboard } from "@/components/TrendsDashboard";
+import { SmsImportCard } from "@/components/SmsImportCard";
 import { requestBudgetInsight } from "@/lib/api";
 
 const Index = () => {
   const account = useActiveAccount();
+  const queryClient = useQueryClient();
 
   // Payment flow state
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("idle");
@@ -102,6 +108,8 @@ const Index = () => {
             .join("\n") || "Budget insight received!";
         setInsight(insightText);
         setPaymentStatus("success");
+        queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/history"] });
         toast.success("Payment successful!", {
           description: "Your budget insight is ready",
         });
@@ -116,7 +124,7 @@ const Index = () => {
         description: error.message,
       });
     }
-  }, [pendingRequest, account]);
+  }, [pendingRequest, account, queryClient]);
 
   const handleCancelPayment = useCallback(() => {
     setPaymentStatus("idle");
@@ -142,7 +150,9 @@ const Index = () => {
       <main className="container mx-auto px-4 pt-24 pb-16">
         <HeroSection />
 
-        <div className="max-w-xl mx-auto mt-8 space-y-8">
+        <div className="max-w-xl mx-auto mt-8 space-y-6">
+          {account && <MoneyTreeAvatar />}
+
           {insight ? (
             <InsightDisplay insight={insight} onNewInsight={handleNewInsight} />
           ) : (
@@ -150,6 +160,14 @@ const Index = () => {
               onSubmit={handleSubmit}
               isLoading={isLoading}
             />
+          )}
+
+          {account && (
+            <>
+              <TrendsDashboard />
+              <ReferralCard />
+              <SmsImportCard />
+            </>
           )}
         </div>
       </main>
