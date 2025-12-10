@@ -97,6 +97,10 @@ app.post("/process", async (req, res) => {
     const previousProfile = wallet && wallet !== "anonymous" 
       ? userStore.getPublicProfile(wallet) 
       : { bp: 0, currentStreak: 0, bestStreak: 0, avatarLevel: 0, totalInsights: 0 };
+    
+    const autoBudget = wallet && wallet !== "anonymous"
+      ? userStore.getAutoBudget(wallet)
+      : undefined;
 
     const insightResult = await generateBudgetInsight({
       text,
@@ -110,6 +114,7 @@ app.post("/process", async (req, res) => {
         avatarLevel: previousProfile.avatarLevel,
         totalInsights: previousProfile.totalInsights,
         bpEarned: 0,
+        autoBudget,
       },
     });
 
@@ -206,12 +211,19 @@ app.post("/api/referral/claim", (req, res) => {
 
 app.post("/api/import/sms", async (req, res) => {
   try {
-    const { text } = req.body;
+    const { text, wallet } = req.body;
     if (!text || typeof text !== "string") {
       return res.status(400).json({ error: "Text content required" });
     }
     const result = await parseAndAnalyze(text);
     if (result.success && result.data) {
+      if (wallet && result.data.optimizedBudget) {
+        userStore.updateAutoBudget(wallet, {
+          Needs: result.data.optimizedBudget.Needs || 50,
+          Wants: result.data.optimizedBudget.Wants || 30,
+          Savings: result.data.optimizedBudget.Savings || 20,
+        });
+      }
       res.json({
         transactions: result.data.transactions,
         totalsByCategory: result.data.totalsByCategory,

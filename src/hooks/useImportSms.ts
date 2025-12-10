@@ -18,11 +18,11 @@ export interface ImportResult {
 
 export function useImportSms() {
   return useMutation({
-    mutationFn: async (text: string): Promise<ImportResult> => {
+    mutationFn: async ({ text, wallet }: { text: string; wallet?: string }): Promise<ImportResult> => {
       const response = await fetch("/api/import/sms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, wallet }),
       });
       const data = await response.json();
       if (!response.ok) {

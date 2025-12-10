@@ -166,7 +166,7 @@ const Index = () => {
             <>
               <TrendsDashboard />
               <ReferralCard />
-              <SmsImportCard />
+              <SmsImportCard wallet={account?.address} />
             </>
           )}
         </div>

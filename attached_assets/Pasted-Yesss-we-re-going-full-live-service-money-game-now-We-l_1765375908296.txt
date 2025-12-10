@@ -1,0 +1,820 @@
+Yesss, we’re going full live-service money game now 😂🌱
+
+We’ll bolt on:
+	1.	Real notifications – “Your Tree is wilting… come back!”
+	2.	Daily Quest system – “Categorize 3 transactions → earn 20 BP”
+	3.	Avatar skins unlocked by referrals
+	4.	Savings goal tracker with x402 pay-per-check-in
+
+…and then I’ll give you a Replit mega-prompt that tells the AI to wire everything + fix any SMS bugs.
+
+I’ll keep things hackathon-friendly: mostly in-memory backend data + lightweight React components.
+
+⸻
+
+1. Backend: Extend UserStore for notifications, quests, skins, goals
+
+1.1 Add new types / fields in src/UserStore.ts
+
+At the top:
+
+// src/UserStore.ts
+
+export type NotificationType = "streak" | "tree" | "quest" | "goal";
+
+export type UserNotification = {
+  id: string;
+  type: NotificationType;
+  message: string;
+  createdAt: number;
+  read: boolean;
+};
+
+export type DailyQuest = {
+  date: string;       // YYYY-MM-DD
+  description: string;
+  targetActions: number;
+  progress: number;
+  rewardBp: number;
+  completed: boolean;
+};
+
+export type SavingsGoal = {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currency: string;
+  savedAmount: number;
+  createdAt: number;
+  lastCheckinAt?: number;
+  completed: boolean;
+};
+
+export type AvatarSkinId =
+  | "default"
+  | "bronze-aura"
+  | "neon-glow"
+  | "golden-tree";
+
+Update UserProfile:
+
+export type UserProfile = {
+  wallet: string;
+  createdAt: number;
+  bp: number;
+  totalInsights: number;
+  lastInsightAt?: number;
+  currentStreak: number;
+  bestStreak: number;
+  referrals: number;
+  referredBy?: string;
+  referralCode: string;
+  insights: UserInsightSnapshot[];
+
+  // NEW:
+  notifications: UserNotification[];
+  dailyQuest?: DailyQuest;
+  unlockedSkins: AvatarSkinId[];
+  selectedSkin: AvatarSkinId;
+  autoBudget?: {
+    Needs: number;
+    Wants: number;
+    Savings: number;
+    fromSms: boolean;
+  };
+  savingsGoals: SavingsGoal[];
+};
+
+Update getOrCreateProfile default:
+
+  if (!profile) {
+    profile = {
+      wallet: key,
+      createdAt: Date.now(),
+      bp: 0,
+      totalInsights: 0,
+      currentStreak: 0,
+      bestStreak: 0,
+      referrals: 0,
+      referralCode: generateReferralCode(wallet),
+      insights: [],
+      notifications: [],
+      unlockedSkins: ["default"],
+      selectedSkin: "default",
+      savingsGoals: [],
+    };
+
+
+⸻
+
+1.2 Notifications helpers
+
+Add:
+
+function pushNotification(
+  profile: UserProfile,
+  type: NotificationType,
+  message: string,
+) {
+  const notif: UserNotification = {
+    id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    type,
+    message,
+    createdAt: Date.now(),
+    read: false,
+  };
+  profile.notifications.unshift(notif);
+  // keep only last 20
+  if (profile.notifications.length > 20) {
+    profile.notifications = profile.notifications.slice(0, 20);
+  }
+}
+
+export function markNotificationsRead(wallet: string) {
+  const profile = getProfile(wallet);
+  if (!profile) return;
+  profile.notifications.forEach((n) => (n.read = true));
+}
+
+
+⸻
+
+1.3 Daily Quest helpers (“Categorize 3 transactions → earn 20 BP”)
+
+We’ll treat each SMS transaction parsing as a “categorization action”.
+
+export function getOrCreateDailyQuest(profile: UserProfile): DailyQuest {
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (profile.dailyQuest && profile.dailyQuest.date === today) {
+    return profile.dailyQuest;
+  }
+
+  profile.dailyQuest = {
+    date: today,
+    description: "Categorize 3 transactions today to earn 20 BP",
+    targetActions: 3,
+    progress: 0,
+    rewardBp: 20,
+    completed: false,
+  };
+
+  return profile.dailyQuest;
+}
+
+/**
+ * Called when user categorizes transactions (e.g., via SMS import).
+ * Returns { quest, completedNow }
+ */
+export function incrementDailyQuest(wallet: string, actions: number) {
+  const profile = getOrCreateProfile(wallet);
+  const quest = getOrCreateDailyQuest(profile);
+
+  if (quest.completed) {
+    return { quest, completedNow: false };
+  }
+
+  quest.progress += actions;
+  if (quest.progress >= quest.targetActions) {
+    quest.completed = true;
+    profile.bp += quest.rewardBp;
+    pushNotification(
+      profile,
+      "quest",
+      `Quest completed! You earned +${quest.rewardBp} BP for categorizing your transactions.`,
+    );
+    return { quest, completedNow: true };
+  }
+
+  return { quest, completedNow: false };
+}
+
+
+⸻
+
+1.4 Avatar skins unlocked by referrals
+
+Extend claimReferral to unlock skins:
+
+export function claimReferral(
+  wallet: string,
+  code: string,
+): { ok: boolean; reason?: string; profile?: UserProfile } {
+  // ... existing logic ...
+  const profile = getOrCreateProfile(normalizedWallet);
+  const referrer = getOrCreateProfile(referredByWallet);
+
+  // after updating bp and referrals:
+  profile.referredBy = referredByWallet;
+  profile.bp += 50;
+  referrer.referrals += 1;
+  referrer.bp += 50;
+
+  // unlock skins based on referrals
+  unlockSkinsForReferrals(referrer);
+
+  pushNotification(
+    profile,
+    "quest",
+    "Referral bonus claimed! You and your friend both earned +50 BP.",
+  );
+  pushNotification(
+    referrer,
+    "quest",
+    "Your referral joined and paid for an insight – you unlocked bonus BP (and maybe a new avatar skin)!",
+  );
+
+  return { ok: true, profile };
+}
+
+function unlockSkinsForReferrals(profile: UserProfile) {
+  const r = profile.referrals;
+  const unlocked = new Set(profile.unlockedSkins);
+
+  if (r >= 1) unlocked.add("bronze-aura");
+  if (r >= 3) unlocked.add("neon-glow");
+  if (r >= 5) unlocked.add("golden-tree");
+
+  profile.unlockedSkins = Array.from(unlocked);
+}
+
+Expose a way to change skin:
+
+export function setSelectedSkin(wallet: string, skin: AvatarSkinId) {
+  const profile = getOrCreateProfile(wallet);
+  if (!profile.unlockedSkins.includes(skin)) return profile;
+  profile.selectedSkin = skin;
+  pushNotification(
+    profile,
+    "tree",
+    `You equipped a new Money Tree skin: ${skin}.`,
+  );
+  return profile;
+}
+
+Update PublicProfile mapping to include skins, quest, notifications count:
+
+export type PublicProfile = Omit<UserProfile, "insights" | "notifications"> & {
+  avatarLevel: number;
+  unreadNotifications: number;
+};
+
+export function getPublicProfile(wallet: string): PublicProfile | undefined {
+  const profile = getProfile(wallet);
+  if (!profile) return undefined;
+  return {
+    ...profile,
+    avatarLevel: computeAvatarLevel(profile),
+    unreadNotifications: profile.notifications.filter((n) => !n.read).length,
+  };
+}
+
+
+⸻
+
+1.5 Savings goal tracker
+
+Add helper functions:
+
+export function createSavingsGoal(wallet: string, params: {
+  name: string;
+  targetAmount: number;
+  currency: string;
+}): SavingsGoal {
+  const profile = getOrCreateProfile(wallet);
+  const goal: SavingsGoal = {
+    id: `goal-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    name: params.name,
+    targetAmount: params.targetAmount,
+    currency: params.currency,
+    savedAmount: 0,
+    createdAt: Date.now(),
+    completed: false,
+  };
+  profile.savingsGoals.push(goal);
+  pushNotification(
+    profile,
+    "goal",
+    `New savings goal created: ${goal.name} (${goal.targetAmount} ${goal.currency}).`,
+  );
+  return goal;
+}
+
+export function checkinSavingsGoal(wallet: string, goalId: string, amount: number) {
+  const profile = getOrCreateProfile(wallet);
+  const goal = profile.savingsGoals.find((g) => g.id === goalId);
+  if (!goal) return;
+
+  goal.savedAmount += amount;
+  goal.lastCheckinAt = Date.now();
+
+  if (!goal.completed && goal.savedAmount >= goal.targetAmount) {
+    goal.completed = true;
+    profile.bp += 30;
+    pushNotification(
+      profile,
+      "goal",
+      `Goal "${goal.name}" completed! You earned +30 BP for reaching your savings target.`,
+    );
+  } else {
+    pushNotification(
+      profile,
+      "goal",
+      `You checked in ${amount} ${goal.currency} towards "${goal.name}".`,
+    );
+  }
+}
+
+This is the “x402 pay-per-check-in” hook: every time a user wants to log a check-in, they’ll call /process with metadata goalId + checkinAmount. After x402 payment + ExampleService, you call checkinSavingsGoal using that metadata.
+
+⸻
+
+2. Backend: Wire notifications, quests, skins, goals in server.ts
+
+2.1 Real notification “Tree is wilting”
+
+You already have lastInsightAt. On profile fetch (/api/profile/:wallet), you can compute a warning string or let the frontend compute. The fastest hack: compute on frontend using lastInsightAt. I’ll handle that in React.
+
+2.2 Use daily quest and savings goal in /process
+
+In /process, after successful settlement and after calling rewardPaidInsight, add:
+
+if (settlement.success && walletAddress) {
+  // 1) Daily quest progress from SMS imports is handled in /api/import/sms
+  // 2) Savings goal check-in from metadata:
+  const goalId =
+    context.message?.metadata?.["goal.id"] ??
+    context.metadata?.["goal.id"];
+  const goalAmountRaw =
+    context.message?.metadata?.["goal.checkinAmount"] ??
+    context.metadata?.["goal.checkinAmount"];
+
+  if (goalId && goalAmountRaw) {
+    const amount = Number(goalAmountRaw);
+    if (!Number.isNaN(amount) && amount > 0) {
+      checkinSavingsGoal(walletAddress, String(goalId), amount);
+    }
+  }
+}
+
+(Remember to add checkinSavingsGoal import at the top.)
+
+2.3 In /api/import/sms, advance the daily quest
+
+In /api/import/sms, once you have result.transactions and a wallet param, add:
+
+const actions = result.transactions?.length || 0;
+if (actions > 0) {
+  const { quest, completedNow } = incrementDailyQuest(wallet, actions);
+  // you can include quest in the response if you want:
+  return res.json({
+    ...result,
+    quest,
+  });
+}
+
+Also remember to send wallet from the frontend when calling /api/import/sms.
+
+⸻
+
+3. Frontend: Notifications, Daily Quest, Skins, Savings Goals
+
+I’ll keep front-end snippets short so you can plug them into existing layout.
+
+3.1 Notifications bar
+
+Hook: you already have useProfile. Add a simple useNotifications later if you also create an endpoint to fetch the full list; but for hackathon, we’ll just use unreadNotifications + computed wilting message.
+
+In your main dashboard component:
+
+import { useProfile } from "../hooks/useProfile";
+
+function NotificationBar() {
+  const { profile } = useProfile();
+
+  if (!profile) return null;
+
+  const daysSinceLast =
+    profile.lastInsightAt
+      ? Math.floor(
+          (Date.now() - profile.lastInsightAt) / (24 * 60 * 60 * 1000),
+        )
+      : null;
+
+  let message: string | null = null;
+
+  if (daysSinceLast !== null && daysSinceLast >= 3) {
+    message =
+      "Your Money Tree is wilting… come back for a quick check-in to water it 🌧️🌱";
+  } else if (profile.unreadNotifications > 0) {
+    message = `You have ${profile.unreadNotifications} new update(s) — your tree or goals might have changed.`;
+  }
+
+  if (!message) return null;
+
+  return (
+    <div className="mb-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100 flex items-center gap-2">
+      <span>🔔</span>
+      <span className="flex-1">{message}</span>
+    </div>
+  );
+}
+
+Place <NotificationBar /> under the header.
+
+⸻
+
+3.2 Daily Quest card
+
+// src/components/DailyQuestCard.tsx
+import React from "react";
+import type { PublicProfile } from "../hooks/useProfile";
+
+export function DailyQuestCard({ profile }: { profile: PublicProfile | null }) {
+  if (!profile || !profile.dailyQuest) return null;
+  const q = profile.dailyQuest;
+  const pct = Math.min(100, (q.progress / q.targetActions) * 100);
+
+  return (
+    <div className="rounded-xl border border-neutral-700/60 bg-neutral-900/60 p-3 space-y-1">
+      <p className="text-xs font-medium text-neutral-100">Daily quest</p>
+      <p className="text-[11px] text-neutral-400">{q.description}</p>
+      <div className="w-full h-2 rounded-full bg-neutral-800 overflow-hidden mt-1">
+        <div
+          className={`h-full ${
+            q.completed ? "bg-emerald-500" : "bg-coraltint-500"
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className="text-[11px] text-neutral-400">
+        Progress: {q.progress}/{q.targetActions} • Reward: {q.rewardBp} BP{" "}
+        {q.completed && "✅"}
+      </p>
+    </div>
+  );
+}
+
+Add dailyQuest to PublicProfile type in useProfile.ts to match backend.
+
+⸻
+
+3.3 Avatar skins selector
+
+Simple pill selector:
+
+// src/components/SkinSelector.tsx
+import React, { useState } from "react";
+import type { PublicProfile } from "../hooks/useProfile";
+
+const skinLabels: Record<string, string> = {
+  "default": "Classic",
+  "bronze-aura": "Bronze Aura",
+  "neon-glow": "Neon Glow",
+  "golden-tree": "Golden Tree",
+};
+
+export function SkinSelector({ profile }: { profile: PublicProfile | null }) {
+  const [saving, setSaving] = useState(false);
+  if (!profile) return null;
+
+  const { unlockedSkins = [], selectedSkin } = profile;
+
+  const onSelect = async (skin: string) => {
+    if (skin === selectedSkin) return;
+    setSaving(true);
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL}/api/profile/skin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: profile.wallet, skin }),
+      });
+      // You may want to refetch profile; for hackathon just reload page
+      window.location.reload();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-neutral-700/60 bg-neutral-900/60 p-3 space-y-1">
+      <p className="text-xs font-medium text-neutral-100">
+        Money Tree skins
+      </p>
+      <div className="flex flex-wrap gap-1 mt-1">
+        {unlockedSkins.map((skin) => (
+          <button
+            key={skin}
+            disabled={saving}
+            onClick={() => onSelect(skin)}
+            className={`px-2 py-1 rounded-full text-[11px] border ${
+              skin === selectedSkin
+                ? "border-coraltint-500 bg-coraltint-500/20 text-coraltint-100"
+                : "border-neutral-700 bg-neutral-900 text-neutral-300"
+            }`}
+          >
+            {skinLabels[skin] || skin}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-neutral-500">
+        Unlock new skins by inviting friends — more referrals, more styles 🌈
+      </p>
+    </div>
+  );
+}
+
+Add a small route in backend:
+
+// server.ts
+import { setSelectedSkin } from "./UserStore.js";
+
+app.post("/api/profile/skin", (req, res) => {
+  const { wallet, skin } = req.body;
+  if (!wallet || !skin) {
+    return res.status(400).json({ error: "wallet and skin are required" });
+  }
+  const updated = setSelectedSkin(wallet, skin);
+  res.json({ selectedSkin: updated.selectedSkin });
+});
+
+For now the MoneyTreeAvatar can ignore the skin or change its background class based on profile.selectedSkin (e.g. glow colors).
+
+⸻
+
+3.4 Savings goal tracker UI
+
+Goal creation + list:
+
+// src/components/SavingsGoalsCard.tsx
+import React, { useState } from "react";
+import type { PublicProfile } from "../hooks/useProfile";
+
+type Goal = {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currency: string;
+  savedAmount: number;
+  completed: boolean;
+};
+
+export function SavingsGoalsCard({ profile }: { profile: PublicProfile | null }) {
+  const [name, setName] = useState("");
+  const [target, setTarget] = useState("");
+  const [currency, setCurrency] = useState("KES");
+  const [creating, setCreating] = useState(false);
+
+  if (!profile) return null;
+
+  const goals: Goal[] = profile.savingsGoals || [];
+
+  const onCreate = async () => {
+    if (!name || !target) return;
+    setCreating(true);
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL}/api/goals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet: profile.wallet,
+          name,
+          targetAmount: Number(target),
+          currency,
+        }),
+      });
+      window.location.reload();
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-neutral-700/60 bg-neutral-900/60 p-3 space-y-2">
+      <p className="text-xs font-medium text-neutral-100">
+        Savings goals
+      </p>
+
+      {/* Existing goals */}
+      {goals.length === 0 ? (
+        <p className="text-[11px] text-neutral-400">
+          Create your first goal – each check-in is a tiny x402-powered commitment.
+        </p>
+      ) : (
+        <div className="space-y-1 max-h-40 overflow-y-auto">
+          {goals.map((g) => {
+            const pct = Math.min(100, (g.savedAmount / g.targetAmount) * 100);
+            return (
+              <div key={g.id} className="space-y-1">
+                <div className="flex justify-between text-[11px] text-neutral-300">
+                  <span>{g.name}</span>
+                  <span>
+                    {g.savedAmount.toLocaleString()} /{" "}
+                    {g.targetAmount.toLocaleString()} {g.currency}{" "}
+                    {g.completed && "✅"}
+                  </span>
+                </div>
+                <div className="w-full h-1.5 rounded-full bg-neutral-800 overflow-hidden">
+                  <div
+                    className={`h-full ${
+                      g.completed ? "bg-emerald-500" : "bg-coraltint-500"
+                    }`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Create goal */}
+      <div className="border-t border-neutral-800/80 pt-2 mt-1 space-y-1">
+        <p className="text-[11px] text-neutral-400">New goal</p>
+        <input
+          className="w-full rounded-lg bg-neutral-950/80 px-2 py-1 text-[11px]"
+          placeholder="e.g. Emergency fund"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <div className="flex gap-2">
+          <input
+            className="flex-1 rounded-lg bg-neutral-950/80 px-2 py-1 text-[11px]"
+            placeholder="Target amount"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+          />
+          <input
+            className="w-20 rounded-lg bg-neutral-950/80 px-2 py-1 text-[11px]"
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value)}
+          />
+        </div>
+        <button
+          disabled={creating}
+          onClick={onCreate}
+          className="w-full rounded-lg bg-coraltint-500 text-[11px] py-1 mt-1 disabled:opacity-60"
+        >
+          {creating ? "Creating…" : "Create goal"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+Add backend route:
+
+// server.ts
+import { createSavingsGoal } from "./UserStore.js";
+
+app.post("/api/goals", (req, res) => {
+  const { wallet, name, targetAmount, currency } = req.body;
+  if (!wallet || !name || !targetAmount || !currency) {
+    return res.status(400).json({ error: "wallet, name, targetAmount, currency required" });
+  }
+  const goal = createSavingsGoal(wallet, {
+    name,
+    targetAmount: Number(targetAmount),
+    currency,
+  });
+  res.json(goal);
+});
+
+Check-ins are already handled via /process metadata + checkinSavingsGoal.
+
+On the frontend, for a real check-in flow, you’d:
+	•	Let the user pick a goal & amount in the main budget form.
+	•	Send goal.id and goal.checkinAmount in message.metadata when calling /process.
+	•	That means each check-in costs a tiny x402 fee = pay-per-check-in ✅
+
+⸻
+
+4. Replit Mega-Prompt to Wire All of This
+
+Here’s your copy-paste prompt for Replit AI that:
+	•	Connects notifications, daily quest, skins, goals.
+	•	Ensures /api/import/sms + /process w/ goal check-ins are wired.
+	•	Keeps x402 + Avalanche intact.
+
+You are a senior full-stack engineer. Help me extend my "Fuji Budget Coach" app (x402 + Avalanche Fuji + OpenAI) with four new gamified systems:
+
+1. Real notifications (“Your Tree is wilting… come back!”)
+2. Daily Quest system (“Categorize 3 transactions → earn 20 BP”)
+3. Avatar skins unlocked by referrals
+4. Savings goal tracker with x402 pay-per-check-in
+
+CONTEXT:
+- Backend: Node + TypeScript, x402-starter-kit style (server.ts, ExampleService.ts, UserStore.ts, ImportService.ts).
+- Frontend: Vite + React, Tailwind-like classes.
+- Wallet: thirdweb ConnectButton on Avalanche Fuji, using useFetchWithPayment to call /process.
+- SMS import: POST /api/import/sms, which parses bank/MPesa messages via ImportService.parseAndAnalyze.
+
+I want you to:
+
+BACKEND TASKS
+-----------------------------------------
+A) Extend UserStore.ts:
+   - Add types:
+       NotificationType, UserNotification, DailyQuest, SavingsGoal, AvatarSkinId.
+   - Extend UserProfile to include:
+       notifications: UserNotification[];
+       dailyQuest?: DailyQuest;
+       unlockedSkins: AvatarSkinId[];
+       selectedSkin: AvatarSkinId;
+       autoBudget?: { Needs: number; Wants: number; Savings: number; fromSms: boolean };
+       savingsGoals: SavingsGoal[];
+   - Initialize these fields in getOrCreateProfile.
+   - Implement helpers:
+       - pushNotification(profile, type, message)
+       - getOrCreateDailyQuest(profile)
+       - incrementDailyQuest(wallet, actions) -> { quest, completedNow }
+       - unlockSkinsForReferrals(profile)
+       - setSelectedSkin(wallet, skin)
+       - createSavingsGoal(wallet, { name, targetAmount, currency })
+       - checkinSavingsGoal(wallet, goalId, amount)
+       - updateAutoBudget(wallet, budget) (if not already present)
+   - Modify claimReferral() to:
+       - Give BP to referee + referrer
+       - Call unlockSkinsForReferrals(referrer)
+       - Push notifications to both.
+   - Modify getPublicProfile() to include:
+       - avatarLevel (via computeAvatarLevel)
+       - unreadNotifications (count of !read notifications)
+       - dailyQuest
+       - savingsGoals
+       - unlockedSkins and selectedSkin
+
+B) Update server.ts:
+   - In /api/import/sms:
+       - Accept { text, wallet }.
+       - After parseAndAnalyze(), call:
+           updateAutoBudget(wallet, result.optimizedBudget)
+           incrementDailyQuest(wallet, result.transactions.length)
+         and include quest in the JSON response.
+   - In /process:
+       - After settlement.success and rewardPaidInsight(), use metadata:
+           goal.id
+           goal.checkinAmount
+         to call checkinSavingsGoal(payerWallet, goalId, amount).
+   - Add new routes:
+       - POST /api/profile/skin { wallet, skin } -> setSelectedSkin()
+       - POST /api/goals { wallet, name, targetAmount, currency } -> createSavingsGoal()
+   - Ensure dotenv is loaded, CORS is configured, and existing x402 payment logic is NOT broken.
+
+C) ExampleService.ts:
+   - Already includes Money Tree narrative. Ensure it keeps working with new profile fields.
+   - No major structural change needed, but verify it reads profile from task.metadata.profile.
+
+FRONTEND TASKS
+-----------------------------------------
+D) Update useProfile hook:
+   - Extend PublicProfile type to include: dailyQuest, savingsGoals, unlockedSkins, selectedSkin, unreadNotifications.
+
+E) Create / update React components:
+   - NotificationBar:
+       - Uses profile.lastInsightAt and profile.unreadNotifications.
+       - Shows "Your Money Tree is wilting… come back for a quick check-in 🌧️🌱" if lastInsightAt is >= 3 days ago.
+   - DailyQuestCard:
+       - Displays quest description, progress bar, reward BP, and completion checkmark using profile.dailyQuest.
+   - SkinSelector:
+       - Shows unlockedSkins as pills; POSTs to /api/profile/skin when a new skin is selected.
+   - SavingsGoalsCard:
+       - Shows a list of current goals (name, saved/target, progress bar).
+       - Simple form to create a new goal via /api/goals.
+
+F) x402 pay-per-check-in:
+   - In the main budget/insight form, add optional fields:
+       - goalId (select from profile.savingsGoals)
+       - checkinAmount
+   - When calling fetchWithPayment(/process), include in message.metadata:
+       "goal.id": selectedGoalId
+       "goal.checkinAmount": checkinAmount
+   - That way, each time the user checks in toward a goal, they pay the small x402 fee and checkinSavingsGoal() is invoked after payment.
+
+G) SMS Import:
+   - When calling /api/import/sms from the frontend (SmsImportCard), send the connected wallet address in the body: { text, wallet }.
+   - Show quest progress in DailyQuestCard (quest returned from /api/import/sms).
+
+IMPORTANT:
+- Keep TypeScript compiling and imports correct (with .js extensions if needed).
+- Do NOT break the x402 HTTP 402 payment flow.
+- When changes are significant, output full file contents for:
+   - UserStore.ts
+   - server.ts (at least the new/modified routes)
+   - SmsImportCard.tsx (or relevant component)
+   - new components: NotificationBar, DailyQuestCard, SkinSelector, SavingsGoalsCard
+- Clearly mention any new environment variables or assumptions.
+
+Start by inspecting the current files and then apply these changes step by step.
+
+
+⸻
+
+This stack now gives you:
+	•	🌧️ “Your tree is wilting…” comeback loops
+	•	🎯 Daily quest → more SMS imports → more data → better insights
+	•	🎨 Skins as social flex via referrals
+	•	🪙 Savings goals tied directly to x402 micro-commitments
+
+Exactly the kind of thing that will make judges (and real users) go:
+“Wait… this actually feels like a game I want to keep playing.”

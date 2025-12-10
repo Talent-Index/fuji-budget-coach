@@ -1,3 +1,10 @@
+export interface AutoBudget {
+  Needs: number;
+  Wants: number;
+  Savings: number;
+  fromSms: boolean;
+}
+
 export interface UserProfile {
   wallet: string;
   bp: number;
@@ -9,6 +16,7 @@ export interface UserProfile {
   referredBy: string | null;
   referralCode: string;
   insights: InsightSnapshot[];
+  autoBudget?: AutoBudget;
 }
 
 export interface InsightSnapshot {

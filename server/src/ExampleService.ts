@@ -56,6 +56,13 @@ function buildTreeNarrative(profile: ProfileData): string {
   return narrative;
 }
 
+interface AutoBudget {
+  Needs: number;
+  Wants: number;
+  Savings: number;
+  fromSms: boolean;
+}
+
 interface ProfileData {
   bp: number;
   currentStreak: number;
@@ -63,6 +70,7 @@ interface ProfileData {
   avatarLevel: number;
   totalInsights: number;
   bpEarned?: number;
+  autoBudget?: AutoBudget;
 }
 
 export interface BudgetInsightRequest {
@@ -124,6 +132,16 @@ To level up your tree: Keep requesting insights daily to build your streak, and 
     };
   }
 
+    const autoBudget = profile.autoBudget;
+    const autoBudgetSection = autoBudget
+      ? `\nSMS AUTO-BUDGET DATA (from user's actual spending):
+  - Needs: ${autoBudget.Needs}%
+  - Wants: ${autoBudget.Wants}%
+  - Savings: ${autoBudget.Savings}%
+This is the user's real spending pattern derived from their SMS bank notifications.
+Compare this with the ideal 50/30/20 rule and explain adjustments.`
+      : "";
+
   try {
     const systemPrompt = `You are "Fuji Budget Coach", an AI budgeting assistant for early crypto users.
 
@@ -131,6 +149,7 @@ CONTEXT:
 - Users pay small microtransactions in USDC via x402 on Avalanche to get each insight.
 - User location: ${request.location || "Not specified"}
 - Preferred currency: ${request.currency || "USD"}
+${autoBudgetSection}
 
 GAMIFICATION:
 - The user has a Money Tree avatar that grows with good habits.
@@ -155,10 +174,14 @@ OUTPUT STRUCTURE (text, not JSON):
 1. Friendly one-line summary.
 2. Clear budget breakdown (percentages + example amounts).
 3. 1-3 problem areas and how to fix them.
-4. A dedicated section titled "Money Tree update" (exact title):
+${autoBudget ? `4. A section titled "Based on your SMS spending" showing:
+   - Your actual spending split from SMS data
+   - How it compares to 50/30/20
+   - Specific adjustments to improve.` : ""}
+${autoBudget ? "5" : "4"}. A dedicated section titled "Money Tree update" (exact title):
    - Include the treeNarrative sentence above.
    - Briefly explain what the current level means and how to level up.
-5. A short bullet list titled "Next 7 days" with exactly 3 bullets.`;
+${autoBudget ? "6" : "5"}. A short bullet list titled "Next 7 days" with exactly 3 bullets.`;
 
     const userPrompt = `User message:
 ${request.text || "Help me build a monthly budget."}

@@ -30,7 +30,11 @@ function formatAmount(amount: number, currency?: string) {
   return `${curr} ${Math.abs(amount).toLocaleString()}`;
 }
 
-export function SmsImportCard() {
+interface SmsImportCardProps {
+  wallet?: string;
+}
+
+export function SmsImportCard({ wallet }: SmsImportCardProps) {
   const [smsText, setSmsText] = useState("");
   const [result, setResult] = useState<ImportResult | null>(null);
   const importSms = useImportSms();
@@ -41,7 +45,7 @@ export function SmsImportCard() {
       return;
     }
     try {
-      const data = await importSms.mutateAsync(smsText);
+      const data = await importSms.mutateAsync({ text: smsText, wallet });
       setResult(data);
       toast.success(`Parsed ${data.transactions.length} transactions`);
     } catch (error: any) {

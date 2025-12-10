@@ -2,6 +2,7 @@ import {
   UserProfile,
   PublicProfile,
   InsightSnapshot,
+  AutoBudget,
   computeAvatarLevel,
   createNewProfile,
 } from "./avatarLevels.js";
@@ -93,6 +94,20 @@ export class UserStore {
   getInsightHistory(wallet: string, limit: number = 50): InsightSnapshot[] {
     const profile = this.getOrCreateProfile(wallet);
     return profile.insights.slice(-limit).reverse();
+  }
+
+  updateAutoBudget(
+    wallet: string,
+    budget: { Needs: number; Wants: number; Savings: number }
+  ): AutoBudget {
+    const profile = this.getOrCreateProfile(wallet);
+    profile.autoBudget = { ...budget, fromSms: true };
+    return profile.autoBudget;
+  }
+
+  getAutoBudget(wallet: string): AutoBudget | undefined {
+    const profile = this.getOrCreateProfile(wallet);
+    return profile.autoBudget;
   }
 
   claimReferral(
