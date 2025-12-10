@@ -26,9 +26,13 @@ Fuji Budget Coach is a web application that provides personalized budgeting advi
 1. **x402 Payment Flow**: Micropayments ($0.02 USDC) per insight
 2. **Avatar Engine**: "Money Tree" gamification with levels 0-5
 3. **Budget Points (BP)**: Reward system with streaks and milestones
-4. **Referral System**: Earn 50 BP for referring friends
+4. **Referral System**: Earn 50 BP for referring friends, unlock skins at 1/3/5/10 referrals
 5. **Trends Dashboard**: Track insight history
 6. **SMS Import**: Parse bank SMS notifications to extract transactions
+7. **Daily Quests**: Categorize transactions to earn BP, resets at midnight UTC
+8. **Notifications**: "Wilting tree" warnings, referral alerts, quest/goal notifications
+9. **Avatar Skins**: Unlock bronze-aura, neon-glow, golden-tree with referrals
+10. **Savings Goals**: Track goals with x402 pay-per-check-in for micro-commitments
 
 ## Project Structure
 
@@ -70,9 +74,15 @@ Fuji Budget Coach is a web application that provides personalized budgeting advi
 - `GET /api/profile/:wallet` - Get user profile with avatar level
 - `GET /api/history/:wallet` - Get insight history
 - `POST /api/referral/claim` - Claim a referral code
+- `POST /api/profile/skin` - Set avatar skin
+
+### Gamification
+- `GET /api/notifications/:wallet` - Get user notifications
+- `POST /api/notifications/read` - Mark notifications as read
+- `POST /api/goals` - Create or check-in to savings goal
 
 ### Import
-- `POST /api/import/sms` - Parse SMS messages for transactions
+- `POST /api/import/sms` - Parse SMS messages for transactions (also advances daily quest)
 
 ## Running Locally
 
@@ -98,3 +108,4 @@ The application is configured for static deployment:
 - **Dec 10, 2025**: Enhanced ExampleService with Money Tree narrative in AI responses
 - **Dec 10, 2025**: Fixed reward timing - BP/streak only granted after successful insight
 - **Dec 10, 2025**: Integrated SMS auto-budget into AI insights - AI now references real spending patterns
+- **Dec 10, 2025**: Added full gamification system - Daily Quests, Notifications, Avatar Skins, Savings Goals
