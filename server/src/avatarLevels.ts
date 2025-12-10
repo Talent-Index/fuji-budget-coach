@@ -5,6 +5,38 @@ export interface AutoBudget {
   fromSms: boolean;
 }
 
+export type NotificationType = "streak" | "tree" | "quest" | "goal";
+
+export interface UserNotification {
+  id: string;
+  type: NotificationType;
+  message: string;
+  createdAt: number;
+  read: boolean;
+}
+
+export interface DailyQuest {
+  date: string;
+  description: string;
+  targetActions: number;
+  progress: number;
+  rewardBp: number;
+  completed: boolean;
+}
+
+export interface SavingsGoal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currency: string;
+  savedAmount: number;
+  createdAt: number;
+  lastCheckinAt?: number;
+  completed: boolean;
+}
+
+export type AvatarSkinId = "default" | "bronze-aura" | "neon-glow" | "golden-tree";
+
 export interface UserProfile {
   wallet: string;
   bp: number;
@@ -17,6 +49,11 @@ export interface UserProfile {
   referralCode: string;
   insights: InsightSnapshot[];
   autoBudget?: AutoBudget;
+  notifications: UserNotification[];
+  dailyQuest?: DailyQuest;
+  unlockedSkins: AvatarSkinId[];
+  selectedSkin: AvatarSkinId;
+  savingsGoals: SavingsGoal[];
 }
 
 export interface InsightSnapshot {
@@ -26,8 +63,9 @@ export interface InsightSnapshot {
   location: string;
 }
 
-export interface PublicProfile extends UserProfile {
+export interface PublicProfile extends Omit<UserProfile, "insights" | "notifications"> {
   avatarLevel: number;
+  unreadNotifications: number;
 }
 
 export function generateReferralCode(): string {
@@ -65,5 +103,9 @@ export function createNewProfile(wallet: string): UserProfile {
     referredBy: null,
     referralCode: generateReferralCode(),
     insights: [],
+    notifications: [],
+    unlockedSkins: ["default"],
+    selectedSkin: "default",
+    savingsGoals: [],
   };
 }

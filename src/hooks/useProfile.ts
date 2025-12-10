@@ -8,6 +8,28 @@ export interface InsightSnapshot {
   location: string;
 }
 
+export interface DailyQuest {
+  date: string;
+  description: string;
+  targetActions: number;
+  progress: number;
+  rewardBp: number;
+  completed: boolean;
+}
+
+export interface SavingsGoal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currency: string;
+  savedAmount: number;
+  createdAt: number;
+  lastCheckinAt?: number;
+  completed: boolean;
+}
+
+export type AvatarSkinId = "default" | "bronze-aura" | "neon-glow" | "golden-tree";
+
 export interface UserProfile {
   wallet: string;
   bp: number;
@@ -18,8 +40,18 @@ export interface UserProfile {
   referrals: string[];
   referredBy: string | null;
   referralCode: string;
-  insights: InsightSnapshot[];
   avatarLevel: number;
+  unreadNotifications: number;
+  dailyQuest?: DailyQuest;
+  savingsGoals: SavingsGoal[];
+  unlockedSkins: AvatarSkinId[];
+  selectedSkin: AvatarSkinId;
+  autoBudget?: {
+    Needs: number;
+    Wants: number;
+    Savings: number;
+    fromSms: boolean;
+  };
 }
 
 export function useProfile() {
@@ -72,6 +104,56 @@ export function useClaimReferral() {
       const data = await response.json();
       if (!response.ok || !data.success) {
         throw new Error(data.error || "Failed to claim referral");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
+    },
+  });
+}
+
+export function useSetSkin() {
+  const account = useActiveAccount();
+  const queryClient = useQueryClient();
+  const wallet = account?.address;
+
+  return useMutation({
+    mutationFn: async (skin: AvatarSkinId) => {
+      if (!wallet) throw new Error("No wallet connected");
+      const response = await fetch("/api/profile/skin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet, skin }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to set skin");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
+    },
+  });
+}
+
+export function useCreateGoal() {
+  const account = useActiveAccount();
+  const queryClient = useQueryClient();
+  const wallet = account?.address;
+
+  return useMutation({
+    mutationFn: async (params: { name: string; targetAmount: number; currency: string }) => {
+      if (!wallet) throw new Error("No wallet connected");
+      const response = await fetch("/api/goals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet, ...params }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to create goal");
       }
       return data;
     },

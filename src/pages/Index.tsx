@@ -12,11 +12,17 @@ import { MoneyTreeAvatar } from "@/components/MoneyTreeAvatar";
 import { ReferralCard } from "@/components/ReferralCard";
 import { TrendsDashboard } from "@/components/TrendsDashboard";
 import { SmsImportCard } from "@/components/SmsImportCard";
+import { NotificationBar } from "@/components/NotificationBar";
+import { DailyQuestCard } from "@/components/DailyQuestCard";
+import { SkinSelector } from "@/components/SkinSelector";
+import { SavingsGoalsCard } from "@/components/SavingsGoalsCard";
+import { useProfile } from "@/hooks/useProfile";
 import { requestBudgetInsight } from "@/lib/api";
 
 const Index = () => {
   const account = useActiveAccount();
   const queryClient = useQueryClient();
+  const { data: profile } = useProfile();
 
   // Payment flow state
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("idle");
@@ -151,6 +157,7 @@ const Index = () => {
         <HeroSection />
 
         <div className="max-w-xl mx-auto mt-8 space-y-6">
+          {account && <NotificationBar profile={profile} />}
           {account && <MoneyTreeAvatar />}
 
           {insight ? (
@@ -164,7 +171,10 @@ const Index = () => {
 
           {account && (
             <>
+              <DailyQuestCard profile={profile} />
               <TrendsDashboard />
+              <SavingsGoalsCard profile={profile} />
+              <SkinSelector profile={profile} />
               <ReferralCard />
               <SmsImportCard wallet={account?.address} />
             </>

@@ -217,12 +217,20 @@ app.post("/api/import/sms", async (req, res) => {
     }
     const result = await parseAndAnalyze(text);
     if (result.success && result.data) {
-      if (wallet && result.data.optimizedBudget) {
-        userStore.updateAutoBudget(wallet, {
-          Needs: result.data.optimizedBudget.Needs || 50,
-          Wants: result.data.optimizedBudget.Wants || 30,
-          Savings: result.data.optimizedBudget.Savings || 20,
-        });
+      let quest = undefined;
+      if (wallet) {
+        if (result.data.optimizedBudget) {
+          userStore.updateAutoBudget(wallet, {
+            Needs: result.data.optimizedBudget.Needs || 50,
+            Wants: result.data.optimizedBudget.Wants || 30,
+            Savings: result.data.optimizedBudget.Savings || 20,
+          });
+        }
+        const actions = result.data.transactions?.length || 0;
+        if (actions > 0) {
+          const questResult = userStore.incrementDailyQuest(wallet, actions);
+          quest = questResult.quest;
+        }
       }
       res.json({
         transactions: result.data.transactions,
@@ -230,6 +238,7 @@ app.post("/api/import/sms", async (req, res) => {
         weeklyTotals: result.data.weeklyTotals,
         optimizedBudget: result.data.optimizedBudget,
         summary: result.data.summary,
+        quest,
       });
     } else {
       res.status(400).json({ error: result.error || "Failed to parse SMS" });
@@ -237,6 +246,62 @@ app.post("/api/import/sms", async (req, res) => {
   } catch (error: any) {
     console.error("Import SMS error:", error);
     res.status(500).json({ error: error.message || "Failed to parse SMS / bank messages" });
+  }
+});
+
+app.post("/api/profile/skin", (req, res) => {
+  try {
+    const { wallet, skin } = req.body;
+    if (!wallet || !skin) {
+      return res.status(400).json({ error: "Wallet and skin are required" });
+    }
+    const updated = userStore.setSelectedSkin(wallet, skin);
+    res.json({ selectedSkin: updated.selectedSkin });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/goals", (req, res) => {
+  try {
+    const { wallet, name, targetAmount, currency } = req.body;
+    if (!wallet || !name || !targetAmount || !currency) {
+      return res.status(400).json({ error: "wallet, name, targetAmount, currency required" });
+    }
+    const goal = userStore.createSavingsGoal(wallet, {
+      name,
+      targetAmount: Number(targetAmount),
+      currency,
+    });
+    res.json(goal);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/notifications/:wallet", (req, res) => {
+  try {
+    const { wallet } = req.params;
+    if (!wallet) {
+      return res.status(400).json({ error: "Wallet address required" });
+    }
+    const notifications = userStore.getNotifications(wallet);
+    res.json({ notifications });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/notifications/read", (req, res) => {
+  try {
+    const { wallet } = req.body;
+    if (!wallet) {
+      return res.status(400).json({ error: "Wallet required" });
+    }
+    userStore.markNotificationsRead(wallet);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
   }
 });
 
