@@ -27,11 +27,11 @@ export function useImportSms() {
       text: string;
       wallet?: string;
     }): Promise<ImportResult> => {
-      // If VITE_API_URL is set (Vercel/Render), use that.
-      // Otherwise, fall back to relative path for local dev.
       const url = API_BASE_URL
         ? `${API_BASE_URL}/api/import/sms`
         : "/api/import/sms";
+
+      console.log("SMS import URL:", url); // 👈 temporary debug
 
       const response = await fetch(url, {
         method: "POST",
